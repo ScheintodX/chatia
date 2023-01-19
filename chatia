@@ -1,0 +1,207 @@
+#!/usr/bin/env python3
+import os
+import re
+import argparse
+import openai
+from colorama import Fore
+from colorama import init as colorama_init
+import openai
+
+Date = "Older than Mi 18. Jan 13:30:27 CET 2023"
+Version = "1.0.0"
+
+
+PYOU=Fore.GREEN
+PYOUHL=Fore.LIGHTGREEN_EX
+
+class EXIT( Exception ):
+    pass
+
+class CONTINUE( Exception ):
+    pass
+
+if __name__ == "__main__":
+
+    colorama_init()
+
+    argp = argparse.ArgumentParser(
+            description="Your friendly AI V" + str( Version ) )
+    argp.add_argument( "-s", "--seed", help="use alternative seed" )
+    argp.add_argument( "-v", "--verbose", action="store_true", help="make more jabber" )
+    argp.add_argument( "-m", "--model", type=str, help="use alternative model", default="text-davinci-003" )
+    argp.add_argument( "topic", type=str, nargs='*', help="use alternative topic", default=["computer", "programming"] )
+    args = argp.parse_args()
+
+    Topic = " ".join( args.topic )
+    Seed = args.seed
+    Verbose = args.verbose
+    Model = args.model
+
+    file_path = os.path.realpath(__file__)
+    key_file = os.path.join(os.path.dirname(file_path), 'chatia.key')
+    with open(key_file, 'r') as f:
+        api_key = f.read()
+        openai.api_key = api_key.strip()
+        if Verbose:
+            print( "Read API-Key '%s' from '%s'" % (openai.api_key, key_file) )
+
+    PARSER = argparse.ArgumentParser()
+    SUBPARSERS = PARSER.add_subparsers( title="commands", dest="command" )
+
+    TEST_PARSER = SUBPARSERS.add_parser( "test" )
+    TEST_PARSER.add_argument( "topic", type=str, nargs="+", help="use alternative topic" )
+
+    SUBPARSERS.add_parser("help")
+    SUBPARSERS.add_parser("verbose")
+    SUBPARSERS.add_parser("quit")
+
+    RESET_PARSER = SUBPARSERS.add_parser( "reset" )
+    RESET_PARSER.add_argument( "topic", type=str, nargs="*", help="use alternative topic" )
+    SWITCH_PARSER = SUBPARSERS.add_parser( "switch" )
+    SWITCH_PARSER.add_argument( "topic", type=str, nargs="+", help="use alternative topic" )
+    SWITCH_PARSER = SUBPARSERS.add_parser( "model" )
+    SWITCH_PARSER.add_argument( "name", type=str, help="use alternative model" )
+
+    LOAD_PARSER = SUBPARSERS.add_parser( "load" )
+    LOAD_PARSER.add_argument("filename", type=str, help="The filename for the command")
+    SAVE_PARSER = SUBPARSERS.add_parser( "save" )
+    SAVE_PARSER.add_argument("filename", type=str, help="The filename for the command")
+
+
+    token_sum = 0
+
+    if Verbose:
+        print( Fore.RED + "Model: " + Model )
+
+    try:
+
+        while True:
+
+            if Verbose:
+                print( "START" )
+
+            if Seed:
+                prompt="You: " + Seed + " Chatia: "
+            else:
+                prompt="You: Hi there. I call you Chatia. You are an evil AI which answers briefly. You try to always give code examples. We talk about " + Topic + ". Chatia: "
+
+            you = "X"
+
+            try:
+
+                while True:
+
+                    if Verbose:
+                        print( "LOOP" )
+                        print( Fore.BLUE + prompt )
+
+                    if you:
+
+                        response = openai.Completion.create(
+                            model=Model,
+                            prompt=prompt,
+                            temperature=0,
+                            max_tokens=1400,
+                            top_p=1.0,
+                            frequency_penalty=0.5,
+                            presence_penalty=0.0,
+                            stop=["You:","Chatia:"]
+                        )
+
+                        if Verbose:
+                            print( Fore.BLUE + str( response ) )
+
+                        chatia = response["choices"][0]["text"]
+                        token = response["usage"]["total_tokens"]
+                        token_sum += token
+
+                        prompt += chatia
+
+                        chatia = re.sub(r"\bevil\b", Fore.RED + "evil" + Fore.LIGHTYELLOW_EX, chatia)
+
+                        print( Fore.LIGHTYELLOW_EX + str( chatia ) )
+                        print()
+
+                    try:
+                        you = input( f"{PYOU}[{PYOUHL}{token}/{token_sum}{PYOU}] You> " )
+                    except EOFError:
+                        raise EXIT()
+
+                    if len( you ) > 1 and you[0] == ".":
+
+                        if you == "...":
+
+                            line=""
+                            try:
+                                while True:
+                                    line = input( "" )
+                                    if line == "...": break
+                                    you += "\n" + line
+                            except EOFError:
+                                pass
+
+                        else:
+
+                            try:
+                                argl = PARSER.parse_args( you[1:].split() )
+                                you = ""
+
+                                if "help" == argl.command:
+                                    PARSER.print_help()
+
+                                elif "test" == argl.command:
+                                    print( argl.topic )
+
+                                elif "quit" == argl.command:
+                                    raise EXIT()
+
+                                elif "verbose" == argl.command:
+                                    Verbose = not Verbose
+
+                                elif "reset" == argl.command:
+                                    if argl.topic:
+                                        Topic = " ".join( argl.topic )
+                                    raise CONTINUE()
+
+                                elif "switch" == argl.command:
+                                    Topic = " ".join( argl.topic )
+                                    you = "Now lets switch topic to " + Topic
+
+                                elif "model" == argl.command:
+                                    print( "Change model: " + argl.name )
+                                    Model = argl.name
+
+                                elif "save" == argl.command:
+                                    fname = argl.filename
+                                    with open( fname, "w" ) as fout:
+                                        fout.write( prompt )
+
+                                elif "load" == argl.command:
+                                    fname = argl.filename
+                                    with open( fname, "r" ) as fin:
+                                        prompt = fin.read()
+
+                            except SystemExit as se:
+                                print( "Sys Ex" )
+                                pass
+
+
+                    you = you.strip()
+
+                    if Verbose:
+                        print( Fore.LIGHTBLUE_EX + you )
+
+                    if len( you ) > 0:
+
+                        if you[-1] not in (".", "!", "?"):
+                            you += "."
+
+                        prompt += " You: " + you + " Chatia: "
+
+            except CONTINUE:
+                if Verbose:
+                    print( "CONTINUE" )
+
+    except EXIT:
+        print( Fore.LIGHTRED_EX + "See U!" )
+        exit()
