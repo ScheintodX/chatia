@@ -6,6 +6,7 @@ import openai
 from colorama import Fore
 from colorama import init as colorama_init
 import openai
+import readline
 
 Date = "Older than Mi 18. Jan 13:30:27 CET 2023"
 Version = "1.0.0"
@@ -23,6 +24,8 @@ class CONTINUE( Exception ):
 if __name__ == "__main__":
 
     colorama_init()
+    #readline.set_edit_mode('vi')
+    readline.parse_and_bind("set editing-mode vi")
 
     argp = argparse.ArgumentParser(
             description="Your friendly AI V" + str( Version ) )
