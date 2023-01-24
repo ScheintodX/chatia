@@ -29,14 +29,14 @@ if __name__ == "__main__":
 
     argp = argparse.ArgumentParser(
             description="Your friendly AI V" + str( Version ) )
-    argp.add_argument( "-s", "--seed", help="use alternative seed" )
+    argp.add_argument( "-p", "--primer", nargs='+', help="use alternative primer" )
     argp.add_argument( "-v", "--verbose", action="store_true", help="make more jabber" )
     argp.add_argument( "-m", "--model", type=str, help="use alternative model", default="text-davinci-003" )
     argp.add_argument( "topic", type=str, nargs='*', help="use alternative topic", default=["computer", "programming"] )
     args = argp.parse_args()
 
     Topic = " ".join( args.topic )
-    Seed = args.seed
+    Primer = " ".join( args.primer ) if args.primer else None
     Verbose = args.verbose
     Model = args.model
 
@@ -83,8 +83,8 @@ if __name__ == "__main__":
             if Verbose:
                 print( "START" )
 
-            if Seed:
-                prompt="You: " + Seed + " Chatia: "
+            if Primer:
+                prompt="You: " + Primer + " Chatia: "
             else:
                 prompt="You: Hi there. I call you Chatia. You are an evil AI which answers briefly. You try to always give code examples. We talk about " + Topic + ". Chatia: "
 
