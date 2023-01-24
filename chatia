@@ -18,8 +18,9 @@ except ImportError:
     print( Fore.RED + "No code coloring installed. Install pygments" )
     colorcode = False
 
+
 Date = "Older than Mi 18. Jan 13:30:27 CET 2023"
-Version = "1.0.0"
+Version = "1.1.0"
 
 
 PYOU=Fore.GREEN
