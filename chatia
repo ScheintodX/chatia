@@ -8,6 +8,16 @@ from colorama import init as colorama_init
 import openai
 import readline
 
+try:
+    from pygments import highlight
+    from pygments.lexers import get_lexer_by_name
+    from pygments.formatters import TerminalFormatter
+    from pygments.util import ClassNotFound
+    colorcode = True
+except ImportError:
+    print( Fore.RED + "No code coloring installed. Install pygments" )
+    colorcode = False
+
 Date = "Older than Mi 18. Jan 13:30:27 CET 2023"
 Version = "1.0.0"
 
@@ -20,6 +30,30 @@ class EXIT( Exception ):
 
 class CONTINUE( Exception ):
     pass
+
+def format_code(code, language):
+
+    try:
+        lexer = get_lexer_by_name(language)
+        formatted_code = highlight(code, lexer, TerminalFormatter())
+        return formatted_code
+
+    except ClassNotFound:
+        return code
+
+
+def color_code( string ):
+
+    matches = re.findall( r"{{CODE: (.*?)}}(.*?){{/CODE}}", string, flags=re.DOTALL )
+    for match in matches:
+        language, code = match[0], match[1]
+
+        formatted_code = format_code( code, language )
+
+        string = string.replace("{{CODE: " + language + "}}" + code + "{{/CODE}}", formatted_code )
+
+    return string
+
 
 if __name__ == "__main__":
 
@@ -86,7 +120,7 @@ if __name__ == "__main__":
             if Primer:
                 prompt="You: " + Primer + " Chatia: "
             else:
-                prompt="You: Hi there. I call you Chatia. You are an evil AI which answers briefly. You try to always give code examples. We talk about " + Topic + ". Chatia: "
+                prompt="You: Hi there. I call you Chatia. You are an evil AI which answers briefly. You try to always give code examples. You begin code examples with {{CODE: name of programming language}} and end it with {{/CODE}}. We talk about " + Topic + ". Chatia: "
 
             you = "X"
 
@@ -121,6 +155,9 @@ if __name__ == "__main__":
                         prompt += chatia
 
                         chatia = re.sub(r"\bevil\b", Fore.RED + "evil" + Fore.LIGHTYELLOW_EX, chatia)
+
+                        if colorcode:
+                            chatia = color_code( chatia )
 
                         print( Fore.LIGHTYELLOW_EX + str( chatia ) )
                         print()
@@ -208,3 +245,6 @@ if __name__ == "__main__":
     except EXIT:
         print( Fore.LIGHTRED_EX + "See U!" )
         exit()
+
+
+        #######
