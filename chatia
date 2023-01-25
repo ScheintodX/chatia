@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+'''
+Copyleft🄯 sometimes in 2023 by Florian Bantner
+Free as in Freesbie. Fly away and have fun.
+'''
+
 import os
 import re
 import argparse
@@ -7,6 +12,16 @@ from colorama import Fore
 from colorama import init as colorama_init
 import openai
 import readline
+
+try:
+    from gtts import gTTS
+    from playsound import playsound
+    mute = False
+except ImportError:
+    print( Fore.RED + "No talkiung installed. Install gtts and playsound." )
+    mute = True
+
+tmp = "/tmp/chatia.mp3"
 
 try:
     from pygments import highlight
@@ -21,7 +36,6 @@ except ImportError:
 
 Date = "Older than Mi 18. Jan 13:30:27 CET 2023"
 Version = "1.1.0"
-
 
 PYOU=Fore.GREEN
 PYOUHL=Fore.LIGHTGREEN_EX
@@ -65,15 +79,24 @@ if __name__ == "__main__":
     argp = argparse.ArgumentParser(
             description="Your friendly AI V" + str( Version ) )
     argp.add_argument( "-p", "--primer", nargs='+', help="use alternative primer" )
+    argp.add_argument( "-P", "--hardcore_primer", nargs='+', help="use alternative primer. really. do it!" )
     argp.add_argument( "-v", "--verbose", action="store_true", help="make more jabber" )
     argp.add_argument( "-m", "--model", type=str, help="use alternative model", default="text-davinci-003" )
+    argp.add_argument( "-t", "--talk", action="store_true", help="start to talk. Set to default off for a reason." )
     argp.add_argument( "topic", type=str, nargs='*', help="use alternative topic", default=["computer", "programming"] )
     args = argp.parse_args()
 
     Topic = " ".join( args.topic )
     Primer = " ".join( args.primer ) if args.primer else None
+    HardcorePrimer = " ".join( args.hardcore_primer ) if args.hardcore_primer else None
     Verbose = args.verbose
     Model = args.model
+    Talk = False
+    if args.talk:
+        if not mute:
+            Talk = True
+        else:
+            raise ArgumentError( "trying to talk but not able to" )
 
     file_path = os.path.realpath(__file__)
     key_file = os.path.join(os.path.dirname(file_path), 'chatia.key')
@@ -118,8 +141,10 @@ if __name__ == "__main__":
             if Verbose:
                 print( "START" )
 
-            if Primer:
-                prompt="You: " + Primer + " Chatia: "
+            if HardcorePrimer:
+                prompt="You: You are chatia. " + HardcorePrimer + " Chatia: "
+            elif Primer:
+                prompt="You: Hi. You are Chatia. We talk about stuff. If its about coding you give examples with {{CODE: name of programming language}} and end it with {{/CODE}}. " + Primer + ". Cahtia: "
             else:
                 prompt="You: Hi there. I call you Chatia. You are an evil AI which answers briefly. You try to always give code examples. You begin code examples with {{CODE: name of programming language}} and end it with {{/CODE}}. We talk about " + Topic + ". Chatia: "
 
@@ -155,12 +180,18 @@ if __name__ == "__main__":
 
                         prompt += chatia
 
-                        chatia = re.sub(r"\bevil\b", Fore.RED + "evil" + Fore.LIGHTYELLOW_EX, chatia)
+                        out = re.sub(r"\bevil\b", Fore.RED + "evil" + Fore.LIGHTYELLOW_EX, chatia)
 
                         if colorcode:
-                            chatia = color_code( chatia )
+                            out = color_code( out )
 
-                        print( Fore.LIGHTYELLOW_EX + str( chatia ) )
+                        print( Fore.LIGHTYELLOW_EX + str( out ) )
+
+                        if Talk:
+                            speech = gTTS( text=chatia, lang="en", slow=False)
+                            speech.save( tmp )
+                            playsound( tmp )
+
                         print()
 
                     try:
