@@ -2,10 +2,15 @@
 '''
 Copyleft🄯 sometimes in 2023 by Florian Bantner
 Free as in Freesbie. Fly away and have fun.
+
+TODO: * catch exceptions and store active session before dying
+      * prevent openai.error.InvalidRequestError: This model's maximum context length is 4097 tokens, however you requested 4132 tokens (2732 in your prompt; 1400 for the completion). Please reduce your prompt; or completion length.
 '''
 
 import os
+import sys
 import re
+import yaml
 import argparse
 import openai
 from colorama import Fore
@@ -18,7 +23,7 @@ try:
     from playsound import playsound
     mute = False
 except ImportError:
-    print( Fore.RED + "No talkiung installed. Install gtts and playsound." )
+    print( Fore.RED + "No talking installed. pip install gtts playsound" )
     mute = True
 
 tmp = "/tmp/chatia.mp3"
@@ -30,8 +35,16 @@ try:
     from pygments.util import ClassNotFound
     colorcode = True
 except ImportError:
-    print( Fore.RED + "No code coloring installed. Install pygments" )
+    print( Fore.RED + "No code coloring installed. pip install pygments" )
     colorcode = False
+
+try:
+    # Displays a nice title in tmux tab
+    from setproctitle import setproctitle
+    setproctitle( "Chatia" )
+except:
+    print( Fore.RED + "No proc title installed. pip install setproctitle" )
+    pass
 
 
 Date = "Older than Mi 18. Jan 13:30:27 CET 2023"
@@ -83,15 +96,21 @@ if __name__ == "__main__":
     argp.add_argument( "-v", "--verbose", action="store_true", help="make more jabber" )
     argp.add_argument( "-m", "--model", type=str, help="use alternative model", default="text-davinci-003" )
     argp.add_argument( "-t", "--talk", action="store_true", help="start to talk. Set to default off for a reason." )
+    argp.add_argument( "-n", "--name", nargs='?', help="Give a different name and persona. Better use softlinks." )
     argp.add_argument( "topic", type=str, nargs='*', help="use alternative topic", default=["computer", "programming"] )
     args = argp.parse_args()
 
-    Topic = " ".join( args.topic )
+    Name = os.path.basename( sys.argv[0] )
+    if args.name: Name = args.name
+    Name = Name[0].upper() + Name[1:].lower()
+    Purpose = "You are an evil AI which answers briefly. You give code examples if they are needed."
+    Topic = "We talk about " + " ".join( args.topic )
     Primer = " ".join( args.primer ) if args.primer else None
     HardcorePrimer = " ".join( args.hardcore_primer ) if args.hardcore_primer else None
     Verbose = args.verbose
     Model = args.model
     Talk = False
+    Flags = ["code"]
     if args.talk:
         if not mute:
             Talk = True
@@ -105,6 +124,40 @@ if __name__ == "__main__":
         openai.api_key = api_key.strip()
         if Verbose:
             print( "Read API-Key '%s' from '%s'" % (openai.api_key, key_file) )
+    persona_file = os.path.join(os.path.dirname(file_path), 'chatia.persona')
+    try:
+        with open( persona_file,'r' ) as f:
+            personas = yaml.load( f, Loader=yaml.SafeLoader )
+        if Name in personas:
+            persona = personas[Name]
+            Purpose = persona["purpose"]
+            if "likes" in persona:
+                likes = persona["likes"]
+                if len( likes ) == 1:
+                    Purpose += f"You like {likes[0]}."
+                else:
+                    Purpose += "You like " + ", ".join( likes[:-1] ) + " and " + likes[-1] + "."
+
+            if "dislikes" in persona:
+                dislikes = persona["dislikes"]
+                if len( dislikes ) == 1:
+                    Purpose += f"You don't like {dislikes[0]}."
+                else:
+                    Purpose += "You don't like " + ", ".join( dislikes[:-1] ) + " and " + dislikes[-1] + "."
+
+            if "topic" in persona:
+                Topic = persona["topic"]
+
+            if not "flags" in persona or not "code" in persona["flags"]:
+                Flags.remove("code")
+
+        else:
+            print( Fore.RED + f"No persona for {Name} found. Continuing with defaults." )
+
+    except FileNotFoundError:
+        print( Fore.RED + f"No persona file {persona_file}. So we can only use default persona." )
+
+    if Name == "Ai": Name = "Chatia"
 
     PARSER = argparse.ArgumentParser()
     SUBPARSERS = PARSER.add_subparsers( title="commands", dest="command" )
@@ -124,9 +177,11 @@ if __name__ == "__main__":
     SWITCH_PARSER.add_argument( "name", type=str, help="use alternative model" )
 
     LOAD_PARSER = SUBPARSERS.add_parser( "load" )
-    LOAD_PARSER.add_argument("filename", type=str, help="The filename for the command")
+    LOAD_PARSER.add_argument("filename", type=str, help="The filename to save this conversation to")
     SAVE_PARSER = SUBPARSERS.add_parser( "save" )
-    SAVE_PARSER.add_argument("filename", type=str, help="The filename for the command")
+    SAVE_PARSER.add_argument("filename", type=str, help="The filename to load this conversation from")
+    INCLUDE_PARSER = SUBPARSERS.add_parser( "include" )
+    INCLUDE_PARSER.add_argument("filename", type=str, help="The filename to include")
 
 
     token_sum = 0
@@ -142,11 +197,18 @@ if __name__ == "__main__":
                 print( "START" )
 
             if HardcorePrimer:
-                prompt="You: You are chatia. " + HardcorePrimer + " Chatia: "
+                prompt=f"You: You are {Name}. {HardcorePrimer}. {Name}: "
             elif Primer:
-                prompt="You: Hi. You are Chatia. We talk about stuff. If its about coding you give examples with {{CODE: name of programming language}} and end it with {{/CODE}}. " + Primer + ". Cahtia: "
+                if "code" in Flags:
+                    Primer = "If we talk about coding you give examples with {{CODE: name of programming language}} and end it with {{/CODE}}. " + Primer
+                prompt=f"You: Hi. You are {Name}. {Primer}. {Name}: "
             else:
-                prompt="You: Hi there. I call you Chatia. You are an evil AI which answers briefly. You try to always give code examples. You begin code examples with {{CODE: name of programming language}} and end it with {{/CODE}}. We talk about " + Topic + ". Chatia: "
+                if "code" in Flags:
+                    Topic = "You begin code examples with {{CODE: name of programming language}} and end it with {{/CODE}}. " + Topic
+                prompt=f"You: Hi there. I call you {Name}. {Purpose}. {Topic}. {Name}: "
+
+            if Topic and setproctitle:
+                setproctitle( Name + ": " + Topic )
 
             you = "X"
 
@@ -168,7 +230,7 @@ if __name__ == "__main__":
                             top_p=1.0,
                             frequency_penalty=0.5,
                             presence_penalty=0.0,
-                            stop=["You:","Chatia:"]
+                            stop=["You:", Name+":"]
                         )
 
                         if Verbose:
@@ -253,6 +315,12 @@ if __name__ == "__main__":
                                     with open( fname, "r" ) as fin:
                                         prompt = fin.read()
 
+                                elif "include" == argl.command:
+                                    fname = argl.filename
+                                    with open( fname, "r" ) as fin:
+                                        you = fin.read()
+
+
                             except SystemExit as se:
                                 print( "Sys Ex" )
                                 pass
@@ -268,7 +336,7 @@ if __name__ == "__main__":
                         if you[-1] not in (".", "!", "?"):
                             you += "."
 
-                        prompt += " You: " + you + " Chatia: "
+                        prompt += " You: " + you + " " + Name + ": "
 
             except CONTINUE:
                 if Verbose:
@@ -278,5 +346,3 @@ if __name__ == "__main__":
         print( Fore.LIGHTRED_EX + "See U!" )
         exit()
 
-
-        #######
