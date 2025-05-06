@@ -12,21 +12,24 @@ import re
 import json
 from configparser import ConfigParser
 import argparse
-import openai
+from openai import OpenAI, RateLimitError
 from colorama import Fore
 from colorama import init as colorama_init
 import readline
+from pathlib import Path
+import pwd
+import tiktoken
+import requests
 
+DEFAULT_PERSONA = "chatia"
 DEFAULT_TOPIC = "computer programming".split()
 
 #/v1/chat/completions	gpt-4, gpt-4-0314, gpt-4-32k, gpt-4-32k-0314, gpt-3.5-turbo, gpt-3.5-turbo-0301
 #/v1/completions	text-davinci-003, text-davinci-002, text-curie-001, text-babbage-001, text-ada-001, davinci, curie, babbage, ada
 
-DEFAULT_INSTRUCT_AS = { "role": "assistant", "pronoun": "I", "am": "am" }
-DEFAULT_ENDPOINT = openai.ChatCompletion
-#DEFAULT_MODEL = "gpt-3.5-turbo"
-#DEFAULT_MODEL = "gpt-4o"
-DEFAULT_MODEL = "gpt-4"
+#DEFAULT_INSTRUCT_AS = { "role": "assistant", "pronoun": "I", "am": "am" }
+DEFAULT_INSTRUCT_AS = { "role": "system", "pronoun": "You", "am": "are", "mypronoun": "Your" }
+DEFAULT_MODEL = "gpt-4.1"
 
 DEFAULT_MODEL_SETTINGS = {
         "temperature": 1,
@@ -36,11 +39,42 @@ DEFAULT_MODEL_SETTINGS = {
         "presence_penalty": 0.0
 }
 
+DEFAULT_MAX_CONTEXT = 100000
+
 class Messages( list ):
+
     def append( self, who, what ):
         super().append( { "role": who, "content": what } )
+
     def back( self, steps ):
         del self[:-(2*steps)]
+
+    def trim_to_fit(self, max_tokens, model, reserved_for_completion=0):
+
+        def count_tokens():
+            try:
+                enc = tiktoken.encoding_for_model(model)
+            except KeyError:
+                try:
+                    enc = tiktoken.encoding_for_model("gpt-4")
+                except KeyError:
+                    enc = get_encoding("cl100k_base")
+
+            total = 0
+            for message in self:
+                total += 4
+                for key, value in message.items():
+                    total += len(enc.encode(value))
+            total += 2
+            return total
+
+        while count_tokens() + reserved_for_completion > max_tokens:
+            if len(self) > 1 and self[0]["role"] == "system":
+                del self[1]
+            elif self:
+                del self[0]
+            else:
+                break
 
 try:
     from gtts import gTTS
@@ -105,6 +139,47 @@ def color_code( string ):
     return string
 
 
+
+APICONTINUE = "[APICONTINUE]"
+
+APIPARSER = argparse.ArgumentParser()
+APIPARSER.add_argument( "func" )
+APIPARSER.add_argument( "param", nargs='?', default=None )
+
+def handle_api_command(cmd_string):
+    args = APIPARSER.parse_args(cmd_string.split())
+    print( args.func, args.param )
+    if args.func == "getVocabularyOrSections":
+        return api_getVocabularyOrSections( args.param ) + APICONTINUE
+    else:
+        return f"<Unknown:{args.func}>"
+
+def augment_with_api(text):
+    pattern = r'\[api\s+([^\]]+)\]'
+    def replacer(match):
+        cmd = match.group(1)
+        return handle_api_command(cmd)
+    return re.sub(pattern, replacer, text)
+
+def api_getVocabularyOrSections(section=None):
+    url = "https://www.axon-e.de/flo/duolingo/vocab/"
+    params = {"action": ""}  # action must always be there!
+    if section:
+        params["s"] = section
+    r = requests.get(url, params=params)
+    print( "GOT: " + r.text )
+    return r.text
+
+
+def getVocabularyOrSections(section=None):
+    url = "https://www.axon-e.de/flo/duolingo/vocab/"
+    params = {"action": ""}  # action must always be there!
+    if section:
+        params["s"] = section
+    r = requests.get(url, params=params)
+    return r.text
+
+
 if __name__ == "__main__":
 
     colorama_init()
@@ -117,8 +192,10 @@ if __name__ == "__main__":
     argp.add_argument( "-v", "--verbose", action="store_true", help="make more jabber" )
     argp.add_argument( "-r", "--reverse", action="store_true", help="reverse roles" )
     argp.add_argument( "-m", "--model", type=str, help="use alternative model", default=DEFAULT_MODEL )
+    argp.add_argument( "-c", "--context", type=int, help="maximum context size in token", default=DEFAULT_MAX_CONTEXT )
     argp.add_argument( "-t", "--talk", action="store_true", help="start to talk. Set to default off for a reason." )
-    argp.add_argument( "-n", "--name", nargs='?', help="Give a different name and persona. Better use softlinks." )
+    argp.add_argument( "-l", "--list", action="store_true", help="List personas." )
+    argp.add_argument( "persona", type=str, help="persona to use", default=DEFAULT_PERSONA )
     argp.add_argument( "topic", type=str, nargs='*', help="use alternative topic", default=DEFAULT_TOPIC )
     argp.add_argument( "--dirty", action="store_true", help="Dirty talk", default=False )
     argp.add_argument( "--nazi", action="store_true", help="Nazi talk", default=False )
@@ -127,13 +204,13 @@ if __name__ == "__main__":
 
     iRole = DEFAULT_INSTRUCT_AS["role"]
     iPronoun = DEFAULT_INSTRUCT_AS["pronoun"]
+    myPronoun = DEFAULT_INSTRUCT_AS["mypronoun"]
     iAm = iPronoun + " " + DEFAULT_INSTRUCT_AS["am"]
 
     Batch = args.batch
 
-    Name = os.path.basename( sys.argv[0] )
-    if args.name:
-        Name = args.name
+    #Name = os.path.basename( sys.argv[0] )
+    Name = args.persona
     Name = Name[0].upper() + Name[1:].lower()
     You = "You" if not args.reverse else Name
     Name = Name if not args.reverse else "You"
@@ -143,6 +220,7 @@ if __name__ == "__main__":
     LongPrimer = " ".join( args.long_primer ) if args.long_primer else None
     Verbose = args.verbose
     Model = args.model
+    Context = args.context
     Talk = False
     Flags = ["code"]
     if args.talk:
@@ -157,18 +235,25 @@ if __name__ == "__main__":
 
 
     file_path = os.path.realpath(__file__)
-    key_file = os.path.join( os.path.dirname(file_path), 'chatia.key' )
+    home_dir = pwd.getpwuid(os.getuid()).pw_dir
+    bin_path = os.path.join(home_dir, "bin")
+    key_file = os.path.join( bin_path, "chatia.key" )
     with open(key_file, 'r') as f:
-        api_key = f.read()
-        openai.api_key = api_key.strip()
+        api_key = f.read().strip()
         if Verbose:
-            print( "Read API-Key '%s' from '%s'" % (openai.api_key, key_file) )
-    persona_file = os.path.join(os.path.dirname(file_path), 'chatia.persona')
+            print( "Read API-Key '%s' from '%s'" % (api_key, key_file) )
+    persona_file = os.path.join(bin_path, 'chatia.persona')
     try:
         if Verbose:
             print( "Read: " + persona_file )
         personas = ConfigParser()
         personas.read( persona_file )
+
+        if args.list:
+            print( ", ".join( personas.keys() )  )
+            exit()
+
+        common = personas["Common"] if "Common" in personas else None
 
         if Name in personas:
             persona = personas[Name]
@@ -176,8 +261,11 @@ if __name__ == "__main__":
                 print( C(Fore.BLUE) + str( dict( persona ) ) )
 
             Purpose = persona["purpose"]
+            if "purpose" in common:
+                Purpose += " " + common["purpose"]
             Purpose = Purpose.replace( "{iAm}", f"{iAm}" )
             Purpose = Purpose.replace( "{iPronoun}", f"{iPronoun}" )
+            Purpose = Purpose.replace( "{myPronoun}", f"{myPronoun}" )
 
             if "likes" in persona:
                 likes = persona["likes"].split(",")
@@ -201,6 +289,9 @@ if __name__ == "__main__":
 
             if "model" in persona:
                 Model = persona["model"]
+
+            if "context" in persona:
+                Context = persona["context"]
 
         else:
             print( C(Fore.RED) + f"No persona for {Name} found. Continuing with defaults." )
@@ -237,12 +328,10 @@ if __name__ == "__main__":
     INCLUDE_PARSER = SUBPARSERS.add_parser( "include" )
     INCLUDE_PARSER.add_argument( "filename", type=str, help="The filename to include" )
 
-
     token = None
     token_sum = 0
 
-    if Verbose:
-        print( C(Fore.RED) + "Model: " + Model )
+    print( C(Fore.YELLOW + "Model: " + Model ) )
 
     try:
 
@@ -279,6 +368,8 @@ if __name__ == "__main__":
 
             try:
 
+                client = OpenAI( api_key=api_key )
+
                 while True:
 
                     if Verbose:
@@ -287,23 +378,35 @@ if __name__ == "__main__":
 
                     if you and len( you ) > 0:
 
-                        # print( ">>>>" + you + "<<<<" )
+                        messages.trim_to_fit( Context, Model, DEFAULT_MODEL_SETTINGS["max_tokens"] )
 
                         try:
-                            response = DEFAULT_ENDPOINT.create(
-                                    **DEFAULT_MODEL_SETTINGS,
-                                    model=Model,
-                                    messages=messages
-                            )
+                            Do = True
+                            while Do:
+                                Do = False
 
-                            if Verbose:
-                                print( C(Fore.BLUE) + str( response ) )
+                                response = client.chat.completions.create(
+                                        **DEFAULT_MODEL_SETTINGS,
+                                        model=Model,
+                                        messages=messages
+                                )
 
-                            chatia = response["choices"][0]["message"]["content"]
-                            token = response["usage"]["total_tokens"]
-                            token_sum += token
+                                if Verbose:
+                                    print( C(Fore.BLUE) + str( response ) )
 
-                            messages.append( "assistant", chatia )
+                                chatia = response.choices[0].message.content
+                                token = response.usage.total_tokens
+                                token_sum += token
+
+                                chatia = augment_with_api( chatia )
+                                if APICONTINUE in chatia:
+                                    chatia = chatia.split(APICONTINUE)[0]
+                                    Do = True
+
+                                messages.append( "assistant", chatia )
+
+                                if not Do:
+                                    break;
 
                             out = re.sub( r"\bevil\b", C(Fore.RED) + "evil" + C(Fore.LIGHTYELLOW_EX), chatia )
 
@@ -319,7 +422,7 @@ if __name__ == "__main__":
 
                             print()
 
-                        except openai.error.RateLimitError as e:
+                        except RateLimitError as e:
                             print( e )
 
                     try:

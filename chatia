@@ -1,0 +1,7 @@
+#!/bin/sh
+
+CHOME=~/workspace-ki/chatia
+
+. $CHOME/venv/bin/activate
+
+python3 $CHOME/chatia2.py $(basename "$0") $@
